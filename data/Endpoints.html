@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Conexión WiFi BioShaker</title>
+  <!-- SweetAlert2 CSS -->
+  <link rel="stylesheet" href="sweetalert2.css" />
+  <!-- SweetAlert2 JS -->
+  <script src="sweetalert2.js"></script>
+  <!-- Apple Font -->
+  <link href="Nunito-Regular.ttf" rel="stylesheet" />
+  <style>
+    /* Reset & tipografía global */
+    * { box-sizing:border-box; margin:0; padding:0; font-family:'Inter',sans-serif; }
+    body {
+      min-height:100vh;
+      background: linear-gradient(135deg,#aeb8e9,#000) no-repeat center center fixed;
+      background-size:cover;
+      display:flex; align-items:center; justify-content:center;
+    }
+
+    /* Contenedor glass — ampliado */
+    .glass-card {
+      position:fixed; top:50%; left:50%;
+      transform:translate(-50%,-50%);
+      width:360px;           /* Aumentamos ancho a 360px */
+      padding:2rem;
+      background:rgba(255,255,255,0.1);
+      border-radius:16px;
+      backdrop-filter:blur(10px);
+      box-shadow:0 8px 32px rgba(0,0,0,0.2);
+      color:#fff; text-align:center;
+    }
+    .glass-card h1 {
+      margin-bottom:1rem; font-size:1.5rem; font-weight:600;
+    }
+
+    /* Selector de idioma */
+    .lang-select-container {
+      position:absolute; top:1rem; right:1rem; width:60px;
+    }
+    .lang-select-container select {
+      width:100%; padding:0.25rem 0.5rem;
+      background:rgba(255,255,255,0.15);
+      border:1px solid rgba(255,255,255,0.3);
+      border-radius:6px; color:#fff; font-size:0.8rem;
+      text-align:center; appearance:none; cursor:pointer;
+    }
+    .lang-select-container::after {
+      content:'▾'; position:absolute; top:50%; right:0.6rem;
+      transform:translateY(-50%); color:#fff; font-size:0.8rem;
+      pointer-events:none;
+    }
+    .lang-select-container select option {
+      background:rgba(0,0,0,0.7); color:#fff;
+    }
+
+    /* Grupos de control */
+    .control-group { margin:1rem 0; text-align:left; }
+    .control-group label { display:block; margin-bottom:0.5rem; font-size:0.9rem; }
+
+    /* Select redes WiFi */
+    .select-container { position:relative; }
+    .select-container select {
+      width:100%; padding:0.5rem 2rem 0.5rem 0.5rem;
+      background:rgba(255,255,255,0.15);
+      border:1px solid rgba(255,255,255,0.3);
+      border-radius:8px; color:#fff; font-size:1rem;
+      appearance:none; cursor:pointer;
+    }
+    .select-container::after {
+      content:'▾'; position:absolute; top:50%; right:0.75rem;
+      transform:translateY(-50%); color:#fff; font-size:0.8rem;
+      pointer-events:none;
+    }
+    .select-container select option {
+      background:rgba(0,0,0,0.7); color:#fff;
+    }
+
+    /* Password con ojito, wrapper independiente */
+    .password-wrapper {
+      position:relative;
+    }
+    .password-wrapper input {
+      width:100%; padding:0.5rem 2.5rem 0.5rem 0.5rem;
+      background:rgba(255,255,255,0.15);
+      border:1px solid rgba(255,255,255,0.3);
+      border-radius:8px; color:#fff; font-size:1rem;
+    }
+    .password-wrapper .toggle-password {
+      position:absolute; top:50%; right:0.75rem;
+      transform:translateY(-50%); font-size:1.2rem;
+      color:#fff; cursor:pointer; user-select:none;
+    }
+
+    /* Botón conectar */
+    .buttons { margin-top:1.5rem; }
+    .buttons button {
+      width:100%; padding:0.75rem;
+      background:linear-gradient(45deg,#38bdf8,#0ea5e9);
+      border:none; border-radius:8px; color:#fff;
+      font-size:1rem; font-weight:600; cursor:pointer;
+      box-shadow:0 6px 12px rgba(0,0,0,0.3);
+      transition:transform .1s,box-shadow .1s;
+    }
+    .buttons button:hover {
+      background:linear-gradient(45deg,#0ea5e9,#22caff);
+    }
+    .buttons button:active {
+      transform:translateY(2px);
+      box-shadow:0 2px 6px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="glass-card">
+    <!-- Selector de idioma -->
+    <div class="lang-select-container">
+      <select id="langSelect">
+        <option value="es">ES</option>
+        <option value="en">EN</option>
+      </select>
+    </div>
+
+    <h1 id="title">Conexión WiFi</h1>
+
+    <!-- SSID -->
+    <div class="control-group select-container">
+      <label for="ssidSelect" id="labelSsid">Seleccione red WiFi:</label>
+      <select id="ssidSelect"></select>
+    </div>
+
+    <!-- Password con ojito, usando wrapper -->
+    <div class="control-group">
+      <label for="wifiPassword" id="labelPwd">Password:</label>
+      <div class="password-wrapper">
+        <input type="password" id="wifiPassword" placeholder="********"/>
+        <span class="toggle-password" onclick="togglePassword()">👁️</span>
+      </div>
+    </div>
+
+    <!-- Botón conectar -->
+    <div class="buttons">
+      <button id="connectBtn" onclick="conectarWifi()">Conectar a red Seleccionada</button>
+    </div>
+  </div>
+
+  <script>
+    // Ejemplo de redes WiFi
+    const redes = ['RedCasa','BioLab-Guest','MiTeléfono','Vecino123'];
+    const ssidSelect = document.getElementById('ssidSelect');
+    redes.forEach(ssid => {
+      const opt = document.createElement('option');
+      opt.value = ssid; opt.textContent = ssid;
+      ssidSelect.appendChild(opt);
+    });
+
+    // Traducciones
+    const translations = {
+      es: {
+        title:'Conexión WiFi',
+        labelSsid:'Seleccione red WiFi:',
+        labelPwd:'Password:',
+        connectBtn:'Conectar a red Seleccionada',
+        errorPwd:'Debes ingresar la contraseña.',
+        confirmTitle:'Conectar a',
+        confirmText:'Se intentará establecer la conexión.',
+        confirmBtn:'Sí, conectar',
+        cancelBtn:'Cancelar',
+        connectingTitle:'Conectando…',
+        connectingText:'SSID: '
+      },
+      en: {
+        title:'WiFi Connection',
+        labelSsid:'Select WiFi network:',
+        labelPwd:'Password:',
+        connectBtn:'Connect to Selected Network',
+        errorPwd:'You must enter the password.',
+        confirmTitle:'Connect to',
+        confirmText:'Attempting to establish connection.',
+        confirmBtn:'Yes, connect',
+        cancelBtn:'Cancel',
+        connectingTitle:'Connecting…',
+        connectingText:'SSID: '
+      }
+    };
+    let lang = 'es';
+
+    // Actualiza textos según idioma
+    function updateLanguage(l) {
+      lang = l; const t = translations[l];
+      document.getElementById('title').textContent      = t.title;
+      document.getElementById('labelSsid').textContent  = t.labelSsid;
+      document.getElementById('labelPwd').textContent   = t.labelPwd;
+      document.getElementById('connectBtn').textContent = t.connectBtn;
+    }
+    document.getElementById('langSelect')
+      .addEventListener('change', e => updateLanguage(e.target.value));
+    updateLanguage(lang);
+
+    // Mostrar/ocultar contraseña
+    function togglePassword() {
+      const inp = document.getElementById('wifiPassword');
+      const ico = document.querySelector('.toggle-password');
+      if (inp.type === 'password') {
+        inp.type = 'text'; ico.textContent = '🙈';
+      } else {
+        inp.type = 'password'; ico.textContent = '👁️';
+      }
+    }
+
+    // Función de conexión con confirmación
+    function conectarWifi() {
+      const ssid = ssidSelect.value;
+      const pwd  = document.getElementById('wifiPassword').value.trim();
+      const t    = translations[lang];
+      if (!pwd) {
+        Swal.fire('Error', t.errorPwd, 'error');
+        return;
+      }
+      Swal.fire({
+        title: `${t.confirmTitle} ${ssid}?`,
+        text: t.confirmText,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: t.confirmBtn,
+        cancelButtonText: t.cancelBtn,
+        confirmButtonColor: '#3085d6',
+        cancelButtonColor: '#aaa'
+      }).then(result => {
+        if (result.isConfirmed) {
+          Swal.fire(t.connectingTitle, `${t.connectingText}${ssid}`, 'info');
+          // Aquí iría la llamada al backend
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>
