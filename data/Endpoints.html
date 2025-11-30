@@ -111,6 +111,13 @@
       transform:translateY(2px);
       box-shadow:0 2px 6px rgba(0,0,0,0.3);
     }
+
+    .glass-card img.logo {
+      display: block;
+      margin: 0 auto 1rem auto;
+      max-width: 150px;
+      height: auto;
+    }
   </style>
 </head>
 <body>
@@ -124,6 +131,7 @@
       </select>
     </div>
 
+    <img src="logo.png" alt="BioSync Logo" class="logo" />
     <h1 id="title">Conexión WiFi</h1>
 
     <!-- SSID -->
@@ -148,14 +156,47 @@
   </div>
 
   <script>
-    // Ejemplo de redes WiFi
-    const redes = ['RedCasa','BioLab-Guest','MiTeléfono','Vecino123'];
+    // Logic to scan networks
     const ssidSelect = document.getElementById('ssidSelect');
-    redes.forEach(ssid => {
-      const opt = document.createElement('option');
-      opt.value = ssid; opt.textContent = ssid;
-      ssidSelect.appendChild(opt);
-    });
+
+    function loadNetworks() {
+        ssidSelect.innerHTML = '<option>Scanning...</option>';
+
+        function checkScan() {
+            fetch('/scan')
+            .then(r => {
+                if(r.status === 202) {
+                    setTimeout(checkScan, 2000); // Retry after 2s
+                } else if(r.ok) {
+                    return r.json();
+                } else {
+                    ssidSelect.innerHTML = '<option>Error scanning</option>';
+                }
+            })
+            .then(data => {
+                if(data && Array.isArray(data)) {
+                    ssidSelect.innerHTML = '';
+                    const unique = [...new Set(data)]; // Remove duplicates
+                    if(unique.length === 0) {
+                         ssidSelect.innerHTML = '<option>No networks found</option>';
+                    }
+                    unique.forEach(ssid => {
+                        const opt = document.createElement('option');
+                        opt.value = ssid; opt.textContent = ssid;
+                        ssidSelect.appendChild(opt);
+                    });
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                ssidSelect.innerHTML = '<option>Error</option>';
+            });
+        }
+
+        checkScan();
+    }
+
+    loadNetworks();
 
     // Traducciones
     const translations = {
@@ -232,7 +273,23 @@
       }).then(result => {
         if (result.isConfirmed) {
           Swal.fire(t.connectingTitle, `${t.connectingText}${ssid}`, 'info');
-          // Aquí iría la llamada al backend
+          // Backend call using POST
+          const formData = new FormData();
+          formData.append('ssid', ssid);
+          formData.append('password', pwd);
+
+          fetch('/connect', {
+              method: 'POST',
+              body: formData
+          })
+            .then(r => {
+                if(r.ok) {
+                     Swal.fire('Sent', 'Connection credentials sent to device.', 'success');
+                } else {
+                     Swal.fire('Error', 'Failed to send credentials.', 'error');
+                }
+            })
+            .catch(() => Swal.fire('Error', 'Network error', 'error'));
         }
       });
     }
