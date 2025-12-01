@@ -18,14 +18,14 @@
       background: linear-gradient(135deg,#aeb8e9,#000000) no-repeat center center fixed;
       background-size:cover;
       display:flex; align-items:center; justify-content:center;
+      padding: 1rem;
     }
 
     /* Glass card ampliado */
     .glass-card {
-      position:fixed;
-      top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:360px;          /* ← aquí lo ampliamos */
+      position:relative;
+      width:100%;
+      max-width: 400px;
       padding:2rem;
       background:rgba(255,255,255,0.1);
       border-radius:16px;
