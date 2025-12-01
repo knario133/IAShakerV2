@@ -18,14 +18,14 @@
       background: linear-gradient(135deg,#aeb8e9,#000000) no-repeat center center fixed;
       background-size:cover;
       display:flex; align-items:center; justify-content:center;
+      padding: 1rem;
     }
 
     /* Glass card ampliado */
     .glass-card {
-      position:fixed;
-      top:50%; left:50%;
-      transform:translate(-50%,-50%);
-      width:360px;          /* ← aquí lo ampliamos */
+      position:relative;
+      width:100%;
+      max-width: 400px;
       padding:2rem;
       background:rgba(255,255,255,0.1);
       border-radius:16px;
@@ -81,7 +81,7 @@
     .buttons {
       display:flex; gap:0.5rem; margin-top:1.5rem;
     }
-    .buttons button {
+    .buttons button, .nav-buttons button, .nav-buttons a {
       flex:1; padding:0.75rem;
       border:none; border-radius:8px;
       font-size:1rem; font-weight:600;
@@ -89,6 +89,9 @@
       transition:transform .1s,box-shadow .1s;
       box-shadow:0 6px 12px rgba(0,0,0,0.3);
       color:#fff;
+      text-decoration: none;
+      display: inline-block;
+      text-align: center;
     }
     .buttons button:active {
       transform:translateY(2px);
@@ -107,10 +110,33 @@
       background:linear-gradient(45deg,#ef4444,#ff6a6a);
     }
 
+    .nav-buttons {
+      display:flex; gap:0.5rem; margin-top:1rem;
+    }
+    .wifi-btn {
+      background:linear-gradient(45deg,#8b5cf6,#a78bfa);
+    }
+    .wifi-btn:hover {
+      background:linear-gradient(45deg,#a78bfa,#c4b5fd);
+    }
+    .wiki-btn {
+      background:linear-gradient(45deg,#10b981,#34d399);
+    }
+    .wiki-btn:hover {
+      background:linear-gradient(45deg,#34d399,#6ee7b7);
+    }
+
     /* Estado actual */
     .status-group { margin-bottom:1rem; text-align:left; }
     .status-group p { margin:0.25rem 0; }
     .warning { color:#ffeb3b; display:none; }
+
+    .glass-card img.logo {
+      display: block;
+      margin: 0 auto 1rem auto;
+      max-width: 150px;
+      height: auto;
+    }
   </style>
 </head>
 <body>
@@ -124,11 +150,16 @@
       </select>
     </div>
 
+    <a href="https://biosync.cl" target="_blank">
+        <img src="logo.png" alt="BioSync Logo" class="logo" />
+    </a>
     <h1 id="title">Control de Velocidad</h1>
 
     <div class="status-group">
       <p><span id="rpmLabel">RPM actual:</span> <span id="currentRpm">--</span></p>
       <p><span id="wifiLabel">WiFi:</span> <span id="wifiStatus">--</span></p>
+      <p><span id="ipLabel">IP:</span> <span id="ipAddress">--</span></p>
+      <p><span id="modeLabel">Modo:</span> <span id="deviceMode">--</span></p>
       <p id="warning" class="warning">ESP32 no accesible</p>
     </div>
 
@@ -146,6 +177,11 @@
       <button id="modifyBtn" class="modify-btn" onclick="modificarVelocidad()">Modificar Velocidad</button>
       <button id="stopBtn"   class="stop-btn"   onclick="detenerMotor()">Detener Motor</button>
     </div>
+
+    <div class="nav-buttons">
+       <button id="wifiBtn" class="wifi-btn" onclick="location.href='Endpoints.html'">Config. WiFi</button>
+       <a id="wikiBtn" href="https://wiki.biosync.cl/" target="_blank" class="wiki-btn">Wiki</a>
+    </div>
   </div>
 
   <script>
@@ -159,8 +195,14 @@
         stopBtn: 'Detener Motor',
         rpmLabel: 'RPM actual:',
         wifiLabel: 'WiFi:',
+        ipLabel: 'IP:',
+        modeLabel: 'Modo:',
+        wifiBtn: 'Config. WiFi',
+        wikiBtn: 'Wiki',
         connected: 'Conectado',
         disconnected: 'Desconectado',
+        running: 'Corriendo',
+        idle: 'Inactivo',
         unreachable: 'ESP32 no accesible',
         confirmModifyTitle: 'Confirmar cambio de velocidad',
         confirmModifyText: vel => `¿Desea confirmar el cambio a ${vel} RPM?`,
@@ -181,8 +223,14 @@
         stopBtn: 'Stop Motor',
         rpmLabel: 'Current RPM:',
         wifiLabel: 'WiFi:',
+        ipLabel: 'IP:',
+        modeLabel: 'Mode:',
+        wifiBtn: 'WiFi Config',
+        wikiBtn: 'Wiki',
         connected: 'Connected',
         disconnected: 'Disconnected',
+        running: 'Running',
+        idle: 'Idle',
         unreachable: 'ESP32 unreachable',
         confirmModifyTitle: 'Confirm speed change',
         confirmModifyText: vel => `Do you want to confirm changing to ${vel} RPM?`,
@@ -211,9 +259,17 @@
       document.getElementById('stopBtn').textContent     = t.stopBtn;
       document.getElementById('rpmLabel').textContent    = t.rpmLabel;
       document.getElementById('wifiLabel').textContent   = t.wifiLabel;
+      document.getElementById('ipLabel').textContent     = t.ipLabel;
+      document.getElementById('modeLabel').textContent   = t.modeLabel;
+      document.getElementById('wifiBtn').textContent     = t.wifiBtn;
+      document.getElementById('wikiBtn').textContent     = t.wikiBtn;
+
       if(latestStatus) {
         document.getElementById('wifiStatus').textContent =
           latestStatus.wifi ? t.connected : t.disconnected;
+        document.getElementById('ipAddress').textContent = latestStatus.ip || '--';
+        document.getElementById('deviceMode').textContent =
+           (latestStatus.mode === 'Running') ? t.running : t.idle;
       }
       if(!esp32Reachable) {
         const warn = document.getElementById('warning');
@@ -284,10 +340,15 @@
         .then(data => {
           latestStatus = data;
           esp32Reachable = true;
+          const t = translations[lang];
           document.getElementById('currentRpm').textContent =
             data.currentRpm.toFixed(1);
           document.getElementById('wifiStatus').textContent =
-            data.wifi ? translations[lang].connected : translations[lang].disconnected;
+            data.wifi ? t.connected : t.disconnected;
+          document.getElementById('ipAddress').textContent = data.ip || '--';
+          document.getElementById('deviceMode').textContent =
+            (data.mode === 'Running') ? t.running : t.idle;
+
           document.getElementById('warning').style.display = 'none';
         })
         .catch(() => {
