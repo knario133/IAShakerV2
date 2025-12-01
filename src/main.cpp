@@ -88,18 +88,31 @@ void handleSplash() {
 void handleNormal() {
   if (buttonPressed()) {
     menuIndex = 0;
+    encoder.clearCount(); // Clear any accumulated movement
     uiState = UI_MENU;
     return;
   }
 
-  lcd.setCursor(0, 0);
-  lcd.print("                ");
-  lcd.setCursor(0, 0);
+  char lineBuf[17];
+
+  // Line 0: IP or Status
+  // Optimization: Do not create String object every loop.
   if (WiFi.status() == WL_CONNECTED) {
-    lcd.print(WiFi.localIP());
+    // Print IP directly into buffer using %u.%u.%u.%u or just use the IPAddress object which supports print,
+    // but for snprintf padding we need a string.
+    // IPAddress implements toString() but we want to avoid heap allocation.
+    IPAddress ip = WiFi.localIP();
+    // Format IP with padding directly into a temporary buffer, then copy to lineBuf if needed,
+    // or just format directly with width.
+    // However, %-16s expects a string argument.
+    char ipStr[17];
+    snprintf(ipStr, sizeof(ipStr), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
+    snprintf(lineBuf, sizeof(lineBuf), "%-16s", ipStr);
   } else {
-    lcd.print(language == 0 ? "No WiFi" : "No WiFi");
+    snprintf(lineBuf, sizeof(lineBuf), "%-16s", "No WiFi");
   }
+  lcd.setCursor(0, 0);
+  lcd.print(lineBuf);
 
   float cur, tgt;
   if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
@@ -107,12 +120,13 @@ void handleNormal() {
     tgt = targetRpm;
     xSemaphoreGive(rpmMutex);
   }
-  char buf[17];
-  snprintf(buf, sizeof(buf), "A:%3.0f T:%3.0f", cur, tgt);
+
+  // Line 1: RPMs
+  char content[17];
+  snprintf(content, sizeof(content), "A:%3.0f T:%3.0f", cur, tgt);
+  snprintf(lineBuf, sizeof(lineBuf), "%-16s", content);
   lcd.setCursor(0, 1);
-  lcd.print("                ");
-  lcd.setCursor(0, 1);
-  lcd.print(buf);
+  lcd.print(lineBuf);
 }
 
 void handleMenu() {
@@ -149,14 +163,14 @@ void handleMenu() {
   for (int i = 0; i < 2; ++i) {
     lcd.setCursor(0, i);
     int idx = top + i;
+    char lineBuf[17];
     if (idx >= menuCount) {
-      lcd.print("                ");
+      snprintf(lineBuf, sizeof(lineBuf), "%-16s", " ");
     } else {
-      lcd.print(idx == menuIndex ? ">" : " ");
-      lcd.print(items[idx][language]);
-      int len = strlen(items[idx][language]);
-      for (int s = len; s < 15; ++s) lcd.print(' ');
+      // Padded format: ">ItemText       " or " ItemText       "
+      snprintf(lineBuf, sizeof(lineBuf), "%s%-15s", (idx == menuIndex ? ">" : " "), items[idx][language]);
     }
+    lcd.print(lineBuf);
   }
 }
 
@@ -180,14 +194,17 @@ void handleAdjustRpm() {
     if (tempTarget > MAX_RPM) tempTarget = MAX_RPM;
   }
 
+  // Optimize LCD update to prevent flicker
   lcd.setCursor(0, 0);
-  lcd.print(language == 0 ? "Ajustar RPM" : "Adjust RPM");
+  char lineBuf[17];
+  snprintf(lineBuf, sizeof(lineBuf), "%-16s", language == 0 ? "Ajustar RPM" : "Adjust RPM");
+  lcd.print(lineBuf);
+
   lcd.setCursor(0, 1);
-  char buf[17];
-  snprintf(buf, sizeof(buf), "RPM: %.0f", tempTarget);
-  lcd.print("                ");
-  lcd.setCursor(0, 1);
-  lcd.print(buf);
+  char content[17];
+  snprintf(content, sizeof(content), "RPM: %.0f", tempTarget);
+  snprintf(lineBuf, sizeof(lineBuf), "%-16s", content);
+  lcd.print(lineBuf);
 
   if (buttonPressed()) {
     if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
@@ -276,6 +293,8 @@ void motorTask(void *parameter) {
     float applied = -1.0f;
     bool jogging = false;
 
+    lastCalc = millis(); // Initialize to avoid huge delta on first run
+
     while (true) {
         float desired;
         if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
@@ -298,15 +317,32 @@ void motorTask(void *parameter) {
             applied = desired;
         }
 
-        if (millis() - lastCalc >= 500) {
-            lastCalc = millis();
+        uint32_t now = millis();
+        uint32_t dt = now - lastCalc;
+        if (dt >= 500) {
             long pos = stepper.getCurrentPositionInSteps();
             long deltaSteps = pos - lastPos;
+
             lastPos = pos;
-            float rpm = (deltaSteps / (float)STEPS_PER_REV) * 120.0f;
+            lastCalc = now;
+
+            // Calculate RPM: (Delta Steps / Steps per Rev) * (60000ms / dt_ms)
+            float rpm = 0.0f;
+            if (dt > 0) {
+                rpm = (deltaSteps / (float)STEPS_PER_REV) * (60000.0f / (float)dt);
+            }
+
+            // Protect shared variable update
             if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
                 currentRpm = rpm;
                 xSemaphoreGive(rpmMutex);
+            }
+
+            // Optional: Reconnect WiFi if lost (Non-blocking check)
+            if (WiFi.status() != WL_CONNECTED && wifiConnected) {
+                 // Logic to handle reconnection could go here, but WiFi.setAutoReconnect(true)
+                 // (default on ESP32) handles transient loss.
+                 // We rely on that for now to avoid blocking this task.
             }
         }
 
@@ -339,16 +375,71 @@ void setupServer() {
     });
 
     server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<200> doc;
+        StaticJsonDocument<300> doc;
         if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
             doc["currentRpm"] = currentRpm;
             doc["targetRpm"] = targetRpm;
             xSemaphoreGive(rpmMutex);
         }
-        doc["wifi"] = (WiFi.status() == WL_CONNECTED);
+        bool connected = (WiFi.status() == WL_CONNECTED);
+        doc["wifi"] = connected;
+        doc["ip"] = connected ? WiFi.localIP().toString() : "0.0.0.0";
+
+        // Determine mode
+        if (targetRpm > 0) {
+            doc["mode"] = "Running";
+        } else {
+            doc["mode"] = "Idle";
+        }
+
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
+    });
+
+    server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+        int n = WiFi.scanComplete();
+        if(n == -2){
+            // Not started, start async scan
+            WiFi.scanNetworks(true);
+            request->send(202, "application/json", "{\"status\":\"scanning\"}");
+        } else if(n == -1){
+            // Scanning
+            request->send(202, "application/json", "{\"status\":\"scanning\"}");
+        } else {
+            // Done
+            DynamicJsonDocument doc(1024);
+            JsonArray array = doc.to<JsonArray>();
+            for(int i=0; i<n; ++i){
+                array.add(WiFi.SSID(i));
+            }
+            String json;
+            serializeJson(doc, json);
+            WiFi.scanDelete();
+            request->send(200, "application/json", json);
+        }
+    });
+
+    // Use POST for sensitive data
+    server.on("/connect", HTTP_POST, [](AsyncWebServerRequest *request){
+        String ssid, password;
+        // Check params regardless of source (URL, Body, etc. as AsyncWebServer handles them uniformly if configured,
+        // but for POST usually we check body or params. hasParam(..., true) checks body for POST.)
+        if (request->hasParam("ssid", true) && request->hasParam("password", true)) {
+             ssid = request->getParam("ssid", true)->value();
+             password = request->getParam("password", true)->value();
+        } else if (request->hasParam("ssid") && request->hasParam("password")) {
+             // Fallback to query params if not in body
+             ssid = request->getParam("ssid")->value();
+             password = request->getParam("password")->value();
+        }
+
+        if (ssid.length() > 0) {
+            WiFi.begin(ssid.c_str(), password.c_str());
+            request->send(200, "text/plain", "Connecting...");
+        } else {
+            request->send(400, "text/plain", "Missing params");
+        }
     });
 
     // Archivos estáticos (CSS/JS/etc.)
@@ -383,17 +474,19 @@ void setup() {
 
     rpmMutex = xSemaphoreCreateMutex();
 
-    WiFiManager wm;
-    wifiConnected = wm.autoConnect("BioShaker_Config");
-    if (!wifiConnected) {
-        wm.startConfigPortal("BioShaker_Config");
-        wifiConnected = (WiFi.status() == WL_CONNECTED);
-    }
-
-    setupServer();
-
+    // Start tasks BEFORE WiFi to allow offline usage (LCD & Motor work immediately)
     xTaskCreatePinnedToCore(uiTask, "uiTask", 4096, NULL, 1, NULL, 0);
-    xTaskCreatePinnedToCore(motorTask, "motorTask", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(motorTask, "motorTask", 4096, NULL, 2, NULL, 1); // Priority 2 for Motor
+
+    WiFiManager wm;
+    wm.setConfigPortalTimeout(180); // 3 minutes timeout
+
+    // Try to connect. If fails, open portal for timeout. Returns result.
+    wifiConnected = wm.autoConnect("BioShaker_Config");
+
+    if (wifiConnected) {
+        setupServer();
+    }
 }
 
 void loop() {
