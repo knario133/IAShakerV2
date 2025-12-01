@@ -375,13 +375,23 @@ void setupServer() {
     });
 
     server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
-        StaticJsonDocument<200> doc;
+        StaticJsonDocument<300> doc;
         if (xSemaphoreTake(rpmMutex, portMAX_DELAY) == pdTRUE) {
             doc["currentRpm"] = currentRpm;
             doc["targetRpm"] = targetRpm;
             xSemaphoreGive(rpmMutex);
         }
-        doc["wifi"] = (WiFi.status() == WL_CONNECTED);
+        bool connected = (WiFi.status() == WL_CONNECTED);
+        doc["wifi"] = connected;
+        doc["ip"] = connected ? WiFi.localIP().toString() : "0.0.0.0";
+
+        // Determine mode
+        if (targetRpm > 0) {
+            doc["mode"] = "Running";
+        } else {
+            doc["mode"] = "Idle";
+        }
+
         String json;
         serializeJson(doc, json);
         request->send(200, "application/json", json);
